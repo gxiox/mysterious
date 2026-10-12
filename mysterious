@@ -1,0 +1,314 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+-- ==================================================
+-- ขั้นที่ 1: วาร์ป (โค้ดของคุณ)
+-- ==================================================
+local function step1_warp()
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+
+    local character = player.Character or player.CharacterAdded:Wait()
+    local root = character:WaitForChild("HumanoidRootPart")
+
+    root.CFrame = CFrame.new(
+        -153.951294, 88.5093994, 207.579758,
+        0.81894803, 0, -0.573867679,
+        0, 1, 0,
+        0.573867679, 0, 0.81894803
+    )
+end
+
+-- ==================================================
+-- ขั้นที่ 2: สร้างล็อบบี้ (โค้ดของคุณ)
+-- ==================================================
+local function step2_create()
+    local vim = game:GetService("VirtualInputManager")
+    local gs = game:GetService("GuiService")
+    local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+    local btn = pg.PlayGUI.CreateLobbyFrame.Container.CreateBtn
+
+    local pos = btn.AbsolutePosition
+    local size = btn.AbsoluteSize
+    local inset = gs:GetGuiInset()
+
+    local x = pos.X + size.X / 2
+    local y = pos.Y + size.Y / 2 + inset.Y
+
+    vim:SendMouseMoveEvent(x, y, game)
+    task.wait(0.1)
+
+    vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+    task.wait(0.1)
+    vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
+
+-- ==================================================
+-- ขั้นที่ 3-4: เลือกโหมด + กดเล่นของโหมด (โค้ดของคุณ)
+-- ==================================================
+local function step34_mode()
+    local vim = game:GetService("VirtualInputManager")
+    local gs = game:GetService("GuiService")
+    local rs = game:GetService("RunService")
+    local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+    -- ฟังก์ชันของขั้นที่ 2 (แบบเก่า)
+    local function selectGui(btn)
+        btn.Selectable = true
+        gs.SelectedObject = btn
+    end
+
+    local function mouseClick(btn)
+        local pos = btn.AbsolutePosition
+        local size = btn.AbsoluteSize
+        local inset = gs:GetGuiInset()
+        local x = pos.X + size.X / 2
+        local y = pos.Y + size.Y / 2 + inset.Y
+
+        vim:SendMouseMoveEvent(x, y, game)
+        task.wait(0.05)
+        vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait(0.05)
+        vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
+
+    local function enterClick()
+        vim:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+    end
+
+    -- ฟังก์ชันของขั้นที่ 3 (แบบใหม่)
+    local function findButton(root)
+        for _, name in ipairs({"Inner", "Outner", "Outer"}) do
+            local c = root:FindFirstChild(name)
+            if c and c:IsA("GuiButton") then return c end
+        end
+        if root:IsA("GuiButton") then return root end
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("GuiButton") then return d end
+        end
+    end
+
+    -- keep = true: กดเสร็จแล้วเลือกค้างไว้ / false: กดเสร็จแล้วเคลียร์
+    local function clickGui(btn, keep)
+        gs.SelectedObject = btn
+        task.wait(0.1)
+        vim:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+        task.wait()
+        if not keep then gs.SelectedObject = nil end
+    end
+
+    -- ขั้นที่ 2: เลือกโหมด Regular (แบบเก่า)
+    local regular = pg:WaitForChild("Challengs").Main.Mode:WaitForChild("Regular")
+    local inner = regular:WaitForChild("Inner")
+
+    selectGui(inner)
+    task.wait(0.1)
+    enterClick()
+    mouseClick(inner)
+
+    -- กันเกมแย่งเลือก (เก็บไว้ เพื่อ disconnect ก่อนขั้น 3)
+    local conn = rs.Heartbeat:Connect(function()
+        if gs.SelectedObject ~= inner then
+            gs.SelectedObject = inner
+        end
+    end)
+
+    task.wait(1.5) -- รอให้การ์ดโผล่
+
+    -- ขั้นที่ 3: กดเล่นของโหมด (แบบใหม่)
+    conn:Disconnect() -- เลิกล็อกที่ Regular.Inner
+
+    local selectBtn = pg.Challengs.Main.Container.RegularCard:WaitForChild("SelectBtn")
+    selectBtn:WaitForChild("Inner", 5)
+    local target = findButton(selectBtn)
+    print("ขั้น 3 เลือก:", target and target:GetFullName(), target and target.ClassName)
+
+    if target then
+        clickGui(target, true) -- true = เลือกค้างไว้ / false = กดเสร็จแล้วปล่อย
+        print("เลือกค้างที่:", gs.SelectedObject == target)
+    end
+end
+
+-- ==================================================
+-- ขั้นที่ 5: กดยืนยันเล่น (โค้ดของคุณ)
+-- ==================================================
+local function step5_confirm()
+    local vim = game:GetService("VirtualInputManager")
+    local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    local gs = game:GetService("GuiService")
+
+    local btn = pg.PlayGUI.PlayFrame.ContainerBtn.PlayBtn
+
+    local pos = btn.AbsolutePosition
+    local size = btn.AbsoluteSize
+    local inset = gs:GetGuiInset()
+
+    local x = pos.X + size.X / 2
+    local y = pos.Y + size.Y / 2 + inset.Y
+
+    vim:SendMouseMoveEvent(x, y, game)
+    task.wait(0.1)
+    vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+    task.wait(0.1)
+    vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
+
+-- ==================================================
+-- UI
+-- ==================================================
+local Window = Fluent:CreateWindow({
+    Title = "Challenge Auto",
+    SubTitle = "เข้าชาเล้นทุก 30 นาที",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Main = Window:AddTab({ Title = "Challenge", Icon = "swords" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("ChallengeAuto")
+SaveManager:SetFolder("ChallengeAuto/config")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+-- ==================================================
+-- ตัวรันรอบ
+-- ==================================================
+local autoOn = false
+local looping = false
+local busy = false
+local cooldownMin = 30
+local stepDelay = 2
+
+local Status = Tabs.Main:AddParagraph({ Title = "สถานะ", Content = "ยังไม่เริ่ม" })
+local function setStatus(text)
+    pcall(function() Status:SetDesc(text) end)
+end
+
+local steps = {
+    { "วาร์ป", step1_warp },
+    { "สร้างล็อบบี้", step2_create },
+    { "เลือกโหมด + กดเล่นของโหมด", step34_mode },
+    { "กดยืนยันเล่น", step5_confirm },
+}
+
+-- force = true: รันให้ครบ แม้ปิด Auto (ใช้กับปุ่มรันทันที)
+local function runRound(force)
+    for i, s in ipairs(steps) do
+        if not force and not autoOn then return false end
+        setStatus(("ขั้น %d/%d: %s"):format(i, #steps, s[1]))
+        local ok, err = pcall(s[2])
+        if not ok then
+            warn(("[Challenge] ขั้น %d (%s) พลาด: %s"):format(i, s[1], tostring(err)))
+            Fluent:Notify({ Title = "ขั้น " .. i .. " พลาด", Content = s[1], Duration = 4 })
+        end
+        task.wait(stepDelay)
+    end
+    return true
+end
+
+local function loop()
+    if looping then return end
+    looping = true
+    while autoOn do
+        local t0 = os.clock()
+        busy = true
+        runRound(false)
+        busy = false
+
+        while autoOn do
+            local remain = cooldownMin * 60 - (os.clock() - t0)
+            if remain <= 0 then break end
+            setStatus(("รอรอบถัดไป %02d:%02d"):format(math.floor(remain / 60), math.floor(remain % 60)))
+            task.wait(1)
+        end
+    end
+    looping = false
+    setStatus("หยุดแล้ว")
+end
+
+local AutoToggle = Tabs.Main:AddToggle("AutoChallenge", {
+    Title = "เปิด Auto Challenge",
+    Default = false
+})
+
+AutoToggle:OnChanged(function(state)
+    autoOn = state
+    if state then task.spawn(loop) end
+    Fluent:Notify({ Title = "Challenge", Content = state and "เริ่มทำงาน" or "หยุดทำงาน", Duration = 3 })
+end)
+
+Tabs.Main:AddSlider("CooldownMin", {
+    Title = "เวลารอระหว่างรอบ (นาที)",
+    Min = 1,
+    Max = 60,
+    Default = 30,
+    Increment = 1,
+    Rounding = 0,
+    Callback = function(v) cooldownMin = v end
+})
+
+Tabs.Main:AddSlider("StepDelay", {
+    Title = "หน่วงระหว่างขั้น (วินาที)",
+    Min = 1,
+    Max = 10,
+    Default = 2,
+    Increment = 0.5,
+    Rounding = 1,
+    Callback = function(v) stepDelay = v end
+})
+
+Tabs.Main:AddButton({
+    Title = "รันทันที 1 รอบ",
+    Callback = function()
+        if busy then
+            Fluent:Notify({ Title = "Challenge", Content = "กำลังรันอยู่", Duration = 3 })
+            return
+        end
+        task.spawn(function()
+            busy = true
+            runRound(true)
+            busy = false
+            setStatus("รันครบ 1 รอบแล้ว")
+        end)
+    end
+})
+
+-- ปุ่มรันแต่ละขั้น เอาไว้ทดสอบทีละขั้น
+for i, s in ipairs(steps) do
+    Tabs.Main:AddButton({
+        Title = ("ทดสอบขั้น %d: %s"):format(i, s[1]),
+        Callback = function()
+            task.spawn(function()
+                local ok, err = pcall(s[2])
+                if not ok then warn("[Challenge] ทดสอบขั้น " .. i .. " พลาด: " .. tostring(err)) end
+            end)
+        end
+    })
+end
+
+SaveManager:LoadAutoloadConfig()
+Window:SelectTab(1)
+
+Fluent:Notify({
+    Title = "Challenge Auto",
+    Content = "โหลดสำเร็จ กดเปิด Auto Challenge ได้เลย",
+    Duration = 6
+})
