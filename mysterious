@@ -1,6 +1,221 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local UIS = game:GetService("UserInputService")
+local vim = game:GetService("VirtualInputManager")
+local gs = game:GetService("GuiService")
+
+local Player = Players.LocalPlayer
+local pg = Player:WaitForChild("PlayerGui")
+
+local SAVE_FILE = "ChallengeHub_Settings.json"
+local COOLDOWN_MIN = 30        -- เข้า challenge ทุกกี่นาที
+local STEP_DELAY = 2           -- หน่วงระหว่างขั้น (วินาที)
+local AUTO_HIDE_DELAY = 2      -- ซ่อน UI อัตโนมัติ 1 ครั้งหลังรัน (วินาที)
+local CONFIRM_INTERVAL = 1.5   -- ขั้น 5: กดซ้ำทุกกี่วินาที
+local CONFIRM_MAX = 20 * 60    -- ขั้น 5: กดซ้ำนานสุดกี่วินาที (กันลูปไม่จบ)
+
+-- กันสคริปต์เก่าทำงานซ้อนตอนรันซ้ำ
+local env = (getgenv and getgenv()) or _G
+env.ChallengeHubRun = (env.ChallengeHubRun or 0) + 1
+local RUN = env.ChallengeHubRun
+local function alive() return env.ChallengeHubRun == RUN end
+
+if env.ChallengeHubWindow then
+    pcall(function() env.ChallengeHubWindow:Destroy() end)
+end
+
+-- ==================================================
+-- Saved settings (จำค่าทุกอย่างไว้ ครั้งหน้ารันแล้วเปิดตามที่เซฟ)
+-- ==================================================
+local settings = {
+    autoChallenge = true,
+    autoLeave = true,
+    autoBuy = true,
+    mode = "Both",
+    capsule = "Off",
+}
+
+pcall(function()
+    if isfile and isfile(SAVE_FILE) then
+        local data = HttpService:JSONDecode(readfile(SAVE_FILE))
+        if data.mode == "Coins" or data.mode == "Gems" or data.mode == "Both" then
+            settings.mode = data.mode
+        end
+        if data.capsule == "Off" or data.capsule == "Gems" then
+            settings.capsule = data.capsule
+        end
+        if type(data.autoChallenge) == "boolean" then settings.autoChallenge = data.autoChallenge end
+        if type(data.autoLeave) == "boolean" then settings.autoLeave = data.autoLeave end
+        if type(data.autoBuy) == "boolean" then settings.autoBuy = data.autoBuy end
+    end
+end)
+
+local function saveSettings()
+    pcall(function()
+        if writefile then
+            writefile(SAVE_FILE, HttpService:JSONEncode(settings))
+        end
+    end)
+end
+
+-- ==================================================
+-- UI (Fluent)
+-- ==================================================
+local Window = Fluent:CreateWindow({
+    Title = "Challenge Hub",
+    SubTitle = "Auto Challenge + Auto Buy",
+    TabWidth = 130,
+    Size = UDim2.fromOffset(500, 340),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+env.ChallengeHubWindow = Window
+
+local Tabs = {
+    Challenge = Window:AddTab({ Title = "Challenge", Icon = "swords" }),
+    Buy = Window:AddTab({ Title = "Auto Buy", Icon = "shopping-cart" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+InterfaceManager:SetLibrary(Fluent)
+InterfaceManager:SetFolder("ChallengeHub")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+
+-- ----- แท็บ Challenge -----
+local ChallengeToggle = Tabs.Challenge:AddToggle("AutoChallenge", {
+    Title = "เปิด Auto Challenge (เข้าทุก " .. COOLDOWN_MIN .. " นาที)",
+    Default = settings.autoChallenge
+})
+ChallengeToggle:OnChanged(function(v)
+    settings.autoChallenge = v
+    saveSettings()
+end)
+
+local ChStatusP = Tabs.Challenge:AddParagraph({
+    Title = "สถานะ Auto Challenge",
+    Content = "เริ่มต้น..."
+})
+local function setChStatus(t) pcall(function() ChStatusP:SetDesc(t) end) end
+
+local LeaveToggle = Tabs.Challenge:AddToggle("AutoLeave", {
+    Title = "Auto Leave (กดออกตอนจบด่าน)",
+    Default = settings.autoLeave
+})
+
+local LeaveStatusP = Tabs.Challenge:AddParagraph({
+    Title = "สถานะออกด่าน",
+    Content = "รอปุ่มออก..."
+})
+local function setLeaveStatus(t) pcall(function() LeaveStatusP:SetDesc(t) end) end
+
+LeaveToggle:OnChanged(function(v)
+    settings.autoLeave = v
+    saveSettings()
+    setLeaveStatus(v and "รอปุ่มออก..." or "ปิดอยู่")
+end)
+
+-- ----- แท็บ Auto Buy -----
+local ModeDropdown = Tabs.Buy:AddDropdown("RerollMode", {
+    Title = "Reroll (Trait)",
+    Values = { "Coins", "Gems", "Both" },
+    Multi = false,
+    Default = settings.mode
+})
+ModeDropdown:OnChanged(function(v)
+    if v == "Coins" or v == "Gems" or v == "Both" then
+        settings.mode = v
+        saveSettings()
+    end
+end)
+
+local CapsuleToggle = Tabs.Buy:AddToggle("Capsule", {
+    Title = "ซื้อ Mystery Capsule (Gems)",
+    Default = settings.capsule == "Gems"
+})
+CapsuleToggle:OnChanged(function(v)
+    settings.capsule = v and "Gems" or "Off"
+    saveSettings()
+end)
+
+local BuyToggle = Tabs.Buy:AddToggle("AutoBuy", {
+    Title = "เปิด Auto Buy (ทุก 1 วินาที)",
+    Default = settings.autoBuy
+})
+BuyToggle:OnChanged(function(v)
+    settings.autoBuy = v
+    saveSettings()
+end)
+
+local BuyStatusP = Tabs.Buy:AddParagraph({ Title = "สถานะ Auto Buy", Content = "รอ..." })
+local function setBuyStatus(t) pcall(function() BuyStatusP:SetDesc(t) end) end
+
+-- ==================================================
+-- ฟังก์ชันช่วย (ใช้ร่วมกันหลายขั้น)
+-- ==================================================
+-- ปุ่มต้องมองเห็นจริงทุกชั้น
+local function isShown(obj)
+    local p = obj
+    while p and p ~= pg do
+        if p:IsA("GuiObject") and not p.Visible then return false end
+        if p:IsA("LayerCollector") and not p.Enabled then return false end
+        p = p.Parent
+    end
+    return p == pg
+end
+
+local function findLeaveBtn()
+    local eg = pg:FindFirstChild("EndGame")
+    local frame = eg and eg:FindFirstChild("EndGameFrame")
+    local buttons = frame and frame:FindFirstChild("Buttons")
+    local leave = buttons and buttons:FindFirstChild("LeaveBtn")
+    if not leave then return nil end
+
+    for _, n in ipairs({"Inner", "Outner"}) do
+        local c = leave:FindFirstChild(n)
+        if c and c:IsA("GuiButton") and isShown(c) and c.AbsoluteSize.X > 0 then return c end
+    end
+    for _, n in ipairs({"Inner", "Outner"}) do
+        local c = leave:FindFirstChild(n)
+        if c and c:IsA("GuiObject") and isShown(c) and c.AbsoluteSize.X > 0 then return c end
+    end
+    return nil
+end
+
+local function getPlayBtn()
+    local g = pg:FindFirstChild("PlayGUI")
+    local f = g and g:FindFirstChild("PlayFrame")
+    local c = f and f:FindFirstChild("ContainerBtn")
+    return c and c:FindFirstChild("PlayBtn")
+end
+
+-- จุดกึ่งกลางปุ่มบนหน้าจอ (บวก GuiInset เฉพาะเมื่อ ScreenGui ไม่ได้ IgnoreGuiInset)
+local function getCenter(btn)
+    local pos = btn.AbsolutePosition
+    local size = btn.AbsoluteSize
+    local x = pos.X + size.X / 2
+    local y = pos.Y + size.Y / 2
+
+    local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
+    if not sg or not sg.IgnoreGuiInset then
+        y = y + gs:GetGuiInset().Y
+    end
+    return x, y
+end
+
+local function clickCenter(btn)
+    local x, y = getCenter(btn)
+
+    vim:SendMouseMoveEvent(x, y, game)
+    task.wait(0.1)
+    vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+    task.wait(0.1)
+    vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
 
 -- ==================================================
 -- ขั้นที่ 1: วาร์ป (โค้ดของคุณ)
@@ -136,9 +351,9 @@ local function step34_mode()
 end
 
 -- ==================================================
--- ขั้นที่ 5: กดยืนยันเล่น (โค้ดของคุณ)
+-- ขั้นที่ 5: กดยืนยันเล่น (โค้ดกดของคุณ ครอบด้วยลูป)
 -- ==================================================
-local function step5_confirm()
+local function step5_pressOnce()
     local vim = game:GetService("VirtualInputManager")
     local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
     local gs = game:GetService("GuiService")
@@ -159,156 +374,246 @@ local function step5_confirm()
     vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
 end
 
--- ==================================================
--- UI
--- ==================================================
-local Window = Fluent:CreateWindow({
-    Title = "Challenge Auto",
-    SubTitle = "เข้าชาเล้นทุก 30 นาที",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460),
-    Acrylic = true,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
+-- วนกดจนปุ่มเล่นหายไป (= เข้าด่านได้แล้ว) เผื่อด่านมีคูลดาวน์
+local function step5_confirm()
+    -- รอให้ปุ่มโผล่ก่อน (สูงสุด 10 วิ)
+    local waited = 0
+    while alive() and settings.autoChallenge and waited < 10 do
+        local b = getPlayBtn()
+        if b and isShown(b) then break end
+        task.wait(0.5)
+        waited += 0.5
+    end
 
-local Tabs = {
-    Main = Window:AddTab({ Title = "Challenge", Icon = "swords" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
-}
+    local b = getPlayBtn()
+    if not (b and isShown(b)) then
+        warn("[Challenge] ขั้น 5: ไม่เจอปุ่มเล่น")
+        return
+    end
 
-local Options = Fluent.Options
+    local start = os.clock()
+    local attempt = 0
+    while alive() and settings.autoChallenge do
+        local btn = getPlayBtn()
+        if not btn or not isShown(btn) then
+            setChStatus("เข้าด่านแล้ว (กดครั้งที่ " .. attempt .. ")")
+            return
+        end
+        if findLeaveBtn() then return end -- ขึ้นหน้าจบด่านแล้ว
+        if os.clock() - start > CONFIRM_MAX then
+            setChStatus("กดเล่นนานเกินกำหนด รอรอบถัดไป")
+            return
+        end
 
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("ChallengeAuto")
-SaveManager:SetFolder("ChallengeAuto/config")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-
--- ==================================================
--- ตัวรันรอบ
--- ==================================================
-local autoOn = false
-local looping = false
-local busy = false
-local cooldownMin = 30
-local stepDelay = 2
-
-local Status = Tabs.Main:AddParagraph({ Title = "สถานะ", Content = "ยังไม่เริ่ม" })
-local function setStatus(text)
-    pcall(function() Status:SetDesc(text) end)
+        attempt += 1
+        setChStatus(("ขั้น 5: กดเล่นซ้ำ ครั้งที่ %d"):format(attempt))
+        pcall(step5_pressOnce)
+        task.wait(CONFIRM_INTERVAL)
+    end
 end
 
+-- ==================================================
+-- ตัวรันรอบ (คุมด้วยปุ่มเปิด/ปิด Auto Challenge)
+-- ==================================================
 local steps = {
     { "วาร์ป", step1_warp },
     { "สร้างล็อบบี้", step2_create },
     { "เลือกโหมด + กดเล่นของโหมด", step34_mode },
-    { "กดยืนยันเล่น", step5_confirm },
+    { "กดยืนยันเล่น (วนจนเข้า)", step5_confirm },
 }
 
--- force = true: รันให้ครบ แม้ปิด Auto (ใช้กับปุ่มรันทันที)
-local function runRound(force)
+local function runRound()
     for i, s in ipairs(steps) do
-        if not force and not autoOn then return false end
-        setStatus(("ขั้น %d/%d: %s"):format(i, #steps, s[1]))
+        if not alive() or not settings.autoChallenge then return end
+        setChStatus(("ขั้น %d/%d: %s"):format(i, #steps, s[1]))
         local ok, err = pcall(s[2])
         if not ok then
             warn(("[Challenge] ขั้น %d (%s) พลาด: %s"):format(i, s[1], tostring(err)))
-            Fluent:Notify({ Title = "ขั้น " .. i .. " พลาด", Content = s[1], Duration = 4 })
         end
-        task.wait(stepDelay)
+        task.wait(STEP_DELAY)
     end
-    return true
 end
 
-local function loop()
-    if looping then return end
-    looping = true
-    while autoOn do
-        local t0 = os.clock()
-        busy = true
-        runRound(false)
-        busy = false
-
-        while autoOn do
-            local remain = cooldownMin * 60 - (os.clock() - t0)
-            if remain <= 0 then break end
-            setStatus(("รอรอบถัดไป %02d:%02d"):format(math.floor(remain / 60), math.floor(remain % 60)))
-            task.wait(1)
+task.spawn(function()
+    task.wait(AUTO_HIDE_DELAY + 1) -- รอ UI ซ่อนก่อน กันคลิกโดน UI
+    local t0 = nil
+    while alive() do
+        if not settings.autoChallenge then
+            t0 = nil
+            setChchallengeOff = nil
+            setChStatus("ปิดอยู่")
+            task.wait(0.5)
+        else
+            local now = os.clock()
+            if not t0 or now - t0 >= COOLDOWN_MIN * 60 then
+                t0 = now
+                runRound()
+            else
+                local remain = COOLDOWN_MIN * 60 - (now - t0)
+                setChStatus(("รอรอบถัดไป %02d:%02d"):format(math.floor(remain / 60), math.floor(remain % 60)))
+                task.wait(1)
+            end
         end
     end
-    looping = false
-    setStatus("หยุดแล้ว")
-end
-
-local AutoToggle = Tabs.Main:AddToggle("AutoChallenge", {
-    Title = "เปิด Auto Challenge",
-    Default = false
-})
-
-AutoToggle:OnChanged(function(state)
-    autoOn = state
-    if state then task.spawn(loop) end
-    Fluent:Notify({ Title = "Challenge", Content = state and "เริ่มทำงาน" or "หยุดทำงาน", Duration = 3 })
 end)
 
-Tabs.Main:AddSlider("CooldownMin", {
-    Title = "เวลารอระหว่างรอบ (นาที)",
-    Min = 1,
-    Max = 60,
-    Default = 30,
-    Increment = 1,
-    Rounding = 0,
-    Callback = function(v) cooldownMin = v end
-})
+-- ==================================================
+-- ขั้นที่ 6: Auto Leave (คลิกเมาส์กลางปุ่ม)
+-- ==================================================
+local leaving = false
 
-Tabs.Main:AddSlider("StepDelay", {
-    Title = "หน่วงระหว่างขั้น (วินาที)",
-    Min = 1,
-    Max = 10,
-    Default = 2,
-    Increment = 0.5,
-    Rounding = 1,
-    Callback = function(v) stepDelay = v end
-})
+task.spawn(function()
+    while alive() do
+        task.wait(0.5)
+        if settings.autoLeave and not leaving then
+            local btn = findLeaveBtn()
+            if btn then
+                leaving = true
+                setLeaveStatus("เจอปุ่มออกแล้ว กำลังกด...")
+                task.wait(0.5) -- รอแอนิเมชันปุ่มเข้าที่
 
-Tabs.Main:AddButton({
-    Title = "รันทันที 1 รอบ",
-    Callback = function()
-        if busy then
-            Fluent:Notify({ Title = "Challenge", Content = "กำลังรันอยู่", Duration = 3 })
-            return
+                -- คลิกซ้ำสูงสุด 5 ครั้ง จนปุ่มหาย (หาตำแหน่งใหม่ทุกครั้ง)
+                for i = 1, 5 do
+                    btn = findLeaveBtn()
+                    if not btn then break end
+                    pcall(clickCenter, btn)
+                    task.wait(1.5)
+                end
+
+                setLeaveStatus("ออกแล้ว รอหน้าจบด่านรอบถัดไป...")
+                leaving = false
+                task.wait(3)
+            end
         end
-        task.spawn(function()
-            busy = true
-            runRound(true)
-            busy = false
-            setStatus("รันครบ 1 รอบแล้ว")
-        end)
     end
-})
+end)
 
--- ปุ่มรันแต่ละขั้น เอาไว้ทดสอบทีละขั้น
-for i, s in ipairs(steps) do
-    Tabs.Main:AddButton({
-        Title = ("ทดสอบขั้น %d: %s"):format(i, s[1]),
-        Callback = function()
-            task.spawn(function()
-                local ok, err = pcall(s[2])
-                if not ok then warn("[Challenge] ทดสอบขั้น " .. i .. " พลาด: " .. tostring(err)) end
-            end)
+-- ==================================================
+-- Auto Buy Trait
+-- ==================================================
+local BuyRemote
+
+local function buyItem(item, currency)
+    local ok, result = pcall(function()
+        if not BuyRemote then
+            BuyRemote = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("BuyItem", 10)
         end
-    })
+        return BuyRemote:InvokeServer(item, 1, currency)
+    end)
+
+    if not ok then
+        warn("[AutoBuy] " .. item .. " (" .. currency .. "): " .. tostring(result))
+        setBuyStatus("ERROR - ดู Console (F9)")
+    end
 end
 
-SaveManager:LoadAutoloadConfig()
+local function purchaseSelected()
+    local mode = settings.mode
+
+    -- Reroll (Trait)
+    if mode == "Coins" or mode == "Both" then
+        buyItem("Trait", "Coins")
+    end
+    if mode == "Gems" or mode == "Both" then
+        buyItem("Trait", "Gems")
+    end
+
+    -- Mystery Capsule
+    if settings.capsule == "Gems" then
+        buyItem("MysteryCapsule", "Gems")
+    end
+end
+
+task.spawn(function()
+    while alive() do
+        if settings.autoBuy then
+            setBuyStatus(("กำลังทำงาน | Reroll: %s | Capsule: %s"):format(
+                settings.mode, settings.capsule == "Gems" and "Gems" or "OFF"))
+            purchaseSelected()
+        else
+            setBuyStatus("หยุดอยู่")
+        end
+        task.wait(1)
+    end
+end)
+
+-- ==================================================
+-- ปุ่มเปิด/ปิด UI (แยกจากหน้าต่าง ลากได้ แตะเพื่อเปิด/ปิด)
+-- ==================================================
+do
+    local Parent = (gethui and gethui()) or pg
+    local old = Parent:FindFirstChild("ChallengeHubToggle")
+    if old then old:Destroy() end
+
+    local TGui = Instance.new("ScreenGui")
+    TGui.Name = "ChallengeHubToggle"
+    TGui.ResetOnSpawn = false
+    TGui.IgnoreGuiInset = true
+    TGui.DisplayOrder = 1000
+    TGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    TGui.Parent = Parent
+
+    local Btn = Instance.new("TextButton")
+    Btn.Name = "ToggleBtn"
+    Btn.Size = UDim2.new(0, 44, 0, 44)
+    Btn.Position = UDim2.new(0, 10, 0, 70)
+    Btn.BackgroundColor3 = Color3.fromRGB(65, 105, 190)
+    Btn.BorderSizePixel = 0
+    Btn.Text = "UI"
+    Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Btn.TextSize = 14
+    Btn.Font = Enum.Font.GothamBold
+    Btn.AutoButtonColor = true
+    Btn.Active = true
+    Btn.Parent = TGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = Btn
+
+    local function toggleUI()
+        pcall(function() Window:Minimize() end)
+    end
+
+    local dragging, moved = false, false
+    local dragStart, startPos
+
+    Btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            moved = false
+            dragStart = input.Position
+            startPos = Btn.Position
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            if d.Magnitude > 8 then moved = true end
+            if moved then
+                Btn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y
+                )
+            end
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            if not moved then toggleUI() end
+        end
+    end)
+end
+
+-- ==================================================
+-- เริ่มทำงาน
+-- ==================================================
 Window:SelectTab(1)
 
-Fluent:Notify({
-    Title = "Challenge Auto",
-    Content = "โหลดสำเร็จ กดเปิด Auto Challenge ได้เลย",
-    Duration = 6
-})
+-- ซ่อน UI อั
